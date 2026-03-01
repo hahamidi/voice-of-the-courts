@@ -1,0 +1,11 @@
+[project]
+name = "a2aj"
+version = "0.1.0"
+description = "Voice of the Courts — automated AI legal podcast and digest using A2AJ Canadian legal data"
+requires-python = ">=3.9"
+dependencies = [
+    "anthropic>=0.94.0",
+    "openai>=2.31.0",
+    "pyyaml>=6.0.3",
+    "requests>=2.32.5",
+]
