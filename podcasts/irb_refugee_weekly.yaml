@@ -1,0 +1,102 @@
+# ============================================
+#  Weekly IRB Refugee Digest
+# ============================================
+
+podcast:
+  name: "Weekly IRB Refugee Digest"
+  description: "Tracks new refugee and immigration decisions for legal aid clinics"
+  schedule: weekly
+  language: en
+  audience: "new Canadians and legal aid clinic staff"
+  tone: "plain-language, supportive"
+
+# --- What to fetch ---
+filter:
+  doc_type: cases
+  datasets: [RAD, RPD, FC, FCA]
+  date_range:
+    mode: relative
+    last_n_days: 7
+  query: "refugee OR asylum OR removal"
+  search_type: full_text
+  sort: newest_first
+  max_results: 20
+  fetch_full_text: true
+  max_text_chars: 3000
+  keyword_include:
+    - "refugee protection"
+    - "removal order"
+  keyword_exclude:
+    - "costs"
+    - "adjournment"
+  min_text_length: 500
+
+# --- How to process ---
+processing:
+  models:
+    fast:
+      provider: openai
+      name: gpt-4o-mini
+      temperature: 0.3
+    smart:
+      provider: openai
+      name: gpt-4o-mini
+      temperature: 0.5
+  chain:
+    - name: split_cases
+      type: function
+      function: split
+      input: "@filter_data"
+
+    - name: summarize
+      type: llm
+      model: fast
+      input: "@split_cases.output"
+      prompt: |
+        You are writing for @audience.
+        Tone: @tone
+
+        Summarize this immigration/refugee decision in under 200 words.
+        Focus on: what was decided, the country of origin, and the type of claim.
+        Explain why it matters to someone navigating the immigration system.
+
+        Case: @item.case_name (@item.citation)
+        Court: @item.court
+        Date: @item.date
+
+        --- DECISION TEXT ---
+        @item.text
+        --- END ---
+
+    - name: combine
+      type: function
+      function: merge
+      input: "@summarize.output"
+      join: "\n\n---\n\n"
+
+    - name: weekly_digest
+      type: llm
+      model: smart
+      input: "@combine.output"
+      prompt: |
+        You are writing a weekly immigration law digest for @audience.
+        Tone: @tone
+
+        Below are summaries of this week's refugee and immigration decisions.
+        Write a cohesive weekly digest with:
+        - A short intro (1-2 sentences on what kind of week it was)
+        - Each case as its own section with a clear headline
+        - A closing note on trends or what to watch
+
+        Keep the total under 800 words.
+
+        --- SUMMARIES ---
+        @input
+        --- END ---
+
+# --- Future ---
+# tts:
+#   engine: elevenlabs
+#   voice: "Rachel"
+# publish:
+#   platform: wordpress

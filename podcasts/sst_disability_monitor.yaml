@@ -1,0 +1,97 @@
+# ============================================
+#  SST Disability Benefits Monitor
+# ============================================
+
+podcast:
+  name: "SST Disability Benefits Monitor"
+  description: "Monitors Social Security Tribunal decisions on disability benefits"
+  schedule: weekly
+  language: en
+  audience: "persons with disabilities and their advocates"
+  tone: "supportive, clear, plain-language"
+
+# --- What to fetch ---
+filter:
+  doc_type: cases
+  datasets: [SST]
+  date_range:
+    mode: relative
+    last_n_days: 14
+  query: "disability benefits"
+  search_type: full_text
+  sort: newest_first
+  max_results: 15
+  fetch_full_text: true
+  max_text_chars: 3000
+  keyword_include:
+    - "disability"
+    - "CPP"
+    - "pension"
+  keyword_exclude:
+    - "adjournment"
+  min_text_length: 400
+
+# --- How to process ---
+processing:
+  models:
+    fast:
+      provider: openai
+      name: gpt-4o-mini
+      temperature: 0.3
+    smart:
+      provider: openai
+      name: gpt-4o-mini
+      temperature: 0.5
+  chain:
+    - name: split_cases
+      type: function
+      function: split
+      input: "@filter_data"
+
+    - name: summarize
+      type: llm
+      model: fast
+      input: "@split_cases.output"
+      prompt: |
+        You are writing for @audience.
+        Tone: @tone
+
+        Summarize this Social Security Tribunal decision in under 200 words.
+        Focus on:
+        - The type of benefit (CPP-D, OAS, EI)
+        - Whether the appeal was allowed or dismissed
+        - The key reasoning
+        - What this means for someone in a similar situation
+
+        Case: @item.case_name (@item.citation)
+        Date: @item.date
+
+        --- DECISION TEXT ---
+        @item.text
+        --- END ---
+
+    - name: combine
+      type: function
+      function: merge
+      input: "@summarize.output"
+      join: "\n\n---\n\n"
+
+    - name: weekly_digest
+      type: llm
+      model: smart
+      input: "@combine.output"
+      prompt: |
+        You are writing a disability benefits digest for @audience.
+        Tone: @tone
+
+        Below are summaries of recent SST decisions.
+        Write a cohesive digest with:
+        - A short intro on what was decided this period
+        - Each case as its own section with a clear headline
+        - A "Key Takeaways" section with practical advice
+
+        Keep the total under 800 words.
+
+        --- SUMMARIES ---
+        @input
+        --- END ---
