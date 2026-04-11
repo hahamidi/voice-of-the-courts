@@ -1,0 +1,101 @@
+# ============================================
+#  Weekly Supreme Court Roundup
+# ============================================
+
+podcast:
+  name: "Weekly Supreme Court Roundup"
+  description: "All recent Supreme Court of Canada decisions — broad coverage for the public"
+  schedule: weekly
+  language: en
+  audience: "general public with no legal background"
+  tone: "plain-language, friendly, engaging"
+
+# --- What to fetch ---
+filter:
+  doc_type: cases
+  datasets: [SCC]
+  date_range:
+    mode: relative
+    last_n_days: 7
+  query: "Canada"
+  search_type: full_text
+  sort: newest_first
+  max_results: 10
+  fetch_full_text: true
+  max_text_chars: 3000
+  min_text_length: 300
+
+# --- How to process ---
+processing:
+  models:
+    fast:
+      provider: openai
+      name: gpt-4o-mini
+      temperature: 0.3
+    smart:
+      provider: openai
+      name: gpt-4o-mini
+      temperature: 0.5
+  chain:
+    - name: split_cases
+      type: function
+      function: split
+      input: "@filter_data"
+
+    - name: summarize
+      type: llm
+      model: fast
+      input: "@split_cases.output"
+      prompt: |
+        You are a legal journalist writing for @audience.
+        Tone: @tone
+
+        Summarize this Supreme Court decision in under 200 words.
+        Explain what was decided and why it matters to everyday Canadians.
+        No legal jargon.
+
+        Case: @item.case_name (@item.citation)
+        Date: @item.date
+
+        --- DECISION TEXT ---
+        @item.text
+        --- END ---
+
+    - name: combine
+      type: function
+      function: merge
+      input: "@summarize.output"
+      join: "\n\n---\n\n"
+
+    - name: weekly_digest
+      type: llm
+      model: smart
+      input: "@combine.output"
+      prompt: |
+        You are writing a weekly legal newsletter for @audience.
+        Tone: @tone
+
+        Below are summaries of this week's Supreme Court decisions.
+        Write a cohesive weekly digest with:
+        - A short intro paragraph
+        - Each case as its own section with a plain-language headline
+        - A closing paragraph on what to watch next
+
+        Keep the total under 800 words.
+
+        --- SUMMARIES ---
+        @input
+        --- END ---
+
+# --- Telegram ---
+telegram:
+  bot_token_env: "TELEGRAM_BOT_TOKEN"
+  channel: "-1003721134576"
+  send_digest: true
+  send_audio: false
+  parse_mode: "Markdown"
+
+# --- TTS (placeholder) ---
+# tts:
+#   engine: elevenlabs
+#   voice: "Rachel"
