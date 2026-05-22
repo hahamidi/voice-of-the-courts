@@ -90,7 +90,7 @@ processing:
 # --- Telegram ---
 telegram:
   bot_token_env: "TELEGRAM_BOT_TOKEN"
-  channel: "-1003721134576"
+  channel: "YOUR_TELEGRAM_CHANNEL_ID"
   send_digest: true
   send_audio: false
   parse_mode: "Markdown"
