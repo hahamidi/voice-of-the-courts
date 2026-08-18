@@ -8,7 +8,16 @@ Reads the "processing:" section of a unified podcast YAML.
 Block types:
   - function: split  — 1 list → many items
   - function: merge  — many items → 1 string
-  - llm              — calls a model; loops automatically if input is a list
+  - llm              — calls a model via LiteLLM; loops automatically if input is a list
+
+Models (processing.models.<key>):
+  provider:    any LiteLLM provider (openai, anthropic, ollama, gemini, groq, ...)
+  name:        model name for that provider
+  temperature: float (default 0.3)
+  api_base:    optional custom endpoint (defaults to http://localhost:11434 for ollama)
+  api_key_env: optional env var name holding the key for a custom endpoint
+  stream:      true to use streaming (auto-enabled if the provider demands it)
+  max_tokens:  optional cap on output tokens
 
 @ references:
   @filter_data         — data from the filter handler
@@ -18,65 +27,67 @@ Block types:
   @settings keys       — values from podcast-level settings (audience, tone, etc.)
 """
 
+import os
 import re
-
-PROVIDERS = {
-    "openai": "_call_openai",
-    "anthropic": "_call_anthropic",
-    "ollama": "_call_ollama",
-}
 
 _REF_PATTERN = re.compile(r"@(\w+(?:\.\w+)*)")
 
+OLLAMA_DEFAULT_BASE = "http://localhost:11434"
+
 
 # ---------------------------------------------------------------------------
-#  Model clients (lazy-imported)
+#  Model client (LiteLLM)
 # ---------------------------------------------------------------------------
 
 
-def _call_openai(model_name: str, prompt: str, temperature: float) -> str:
-    from openai import OpenAI
-    client = OpenAI()
-    resp = client.chat.completions.create(
-        model=model_name,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-    )
-    return resp.choices[0].message.content
+def build_model_id(provider: str, name: str) -> str:
+    """Return the LiteLLM model id for a provider + model name pair."""
+    if provider == "ollama":
+        # LiteLLM recommends the chat endpoint for better responses
+        return f"ollama_chat/{name}"
+    return f"{provider}/{name}"
 
 
-def _call_anthropic(model_name: str, prompt: str, temperature: float) -> str:
-    from anthropic import Anthropic
-    client = Anthropic()
-    resp = client.messages.create(
-        model=model_name,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-    )
-    return resp.content[0].text
+def _call_llm(
+    model_id: str,
+    prompt: str,
+    temperature: float,
+    api_base: str | None = None,
+    max_tokens: int | None = None,
+    api_key: str | None = None,
+    stream: bool = False,
+) -> str:
+    import litellm
 
+    litellm.suppress_debug_info = True
+    kwargs = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+    }
+    if api_base:
+        kwargs["api_base"] = api_base
+    if max_tokens:
+        kwargs["max_tokens"] = max_tokens
+    if api_key:
+        kwargs["api_key"] = api_key
 
-def _call_ollama(model_name: str, prompt: str, temperature: float) -> str:
-    import requests
-    resp = requests.post(
-        "http://localhost:11434/api/generate",
-        json={
-            "model": model_name,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": temperature},
-        },
-    )
-    resp.raise_for_status()
-    return resp.json()["response"]
+    if not stream:
+        try:
+            resp = litellm.completion(**kwargs)
+            return resp.choices[0].message.content or ""
+        except litellm.BadRequestError as e:
+            # Some hosted models (e.g. Qwen3.8-Flash on Together) only accept streaming
+            if "stream" not in str(e).lower():
+                raise
+            print("    (model requires streaming, retrying with stream=True)")
 
-
-_CALL_FNS = {
-    "openai": _call_openai,
-    "anthropic": _call_anthropic,
-    "ollama": _call_ollama,
-}
+    parts = []
+    for chunk in litellm.completion(**kwargs, stream=True):
+        delta = chunk.choices[0].delta.content if chunk.choices else None
+        if delta:
+            parts.append(delta)
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -208,10 +219,21 @@ class ProcessingHandler:
         provider = model_conf.get("provider", "openai")
         model_name = model_conf.get("name", model_key)
         temperature = model_conf.get("temperature", 0.3)
+        max_tokens = model_conf.get("max_tokens")
+        api_base = model_conf.get("api_base")
+        stream = bool(model_conf.get("stream", False))
+        if provider == "ollama" and not api_base:
+            api_base = OLLAMA_DEFAULT_BASE
+        model_id = build_model_id(provider, model_name)
+        api_key = None
+        key_env = model_conf.get("api_key_env")
+        if key_env:
+            api_key = os.environ.get(key_env)
+            if not api_key:
+                raise ValueError(f"Model '{model_key}' sets api_key_env but {key_env} is not in the environment")
 
-        call_fn = _CALL_FNS.get(provider)
-        if call_fn is None:
-            raise ValueError(f"Unknown provider: {provider}")
+        def call_fn(prompt: str) -> str:
+            return _call_llm(model_id, prompt, temperature, api_base, max_tokens, api_key, stream)
 
         if isinstance(data, list):
             results = []
@@ -219,12 +241,12 @@ class ProcessingHandler:
                 item_dict = item if isinstance(item, dict) else {"text": str(item)}
                 prompt = self._render_prompt(prompt_template, str(item), item_dict)
                 print(f"    processing item {i + 1}/{len(data)}...")
-                results.append(call_fn(model_name, prompt, temperature))
+                results.append(call_fn(prompt))
             return results
 
         item_dict = data if isinstance(data, dict) else {}
         prompt = self._render_prompt(prompt_template, str(data), item_dict)
-        return call_fn(model_name, prompt, temperature)
+        return call_fn(prompt)
 
     def _render_prompt(self, template: str, input_text: str, item: dict) -> str:
         result = template
