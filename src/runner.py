@@ -7,14 +7,23 @@ Sections:
   podcast:     general info (name, description, schedule, language, audience, tone)
   filter:      what to fetch from A2AJ
   processing:  LLM chain to transform the data
-  # future:    tts, publish, email, social, etc.
+  tts:         synthesize the final digest into audio
+  telegram:    send digest text and audio to a channel
 """
 
+from pathlib import Path
+
 import yaml
+from dotenv import load_dotenv
 
 from src.handlers.filter import FilterHandler
 from src.handlers.processing import ProcessingHandler
 from src.handlers.telegram import TelegramHandler
+from src.handlers.tts import TTSHandler
+
+
+# Load API keys from <project_root>/.env if present (never overrides real env vars)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 class PodcastRunner:
@@ -36,7 +45,8 @@ class PodcastRunner:
         Run the full pipeline:
           1. filter  — fetch cases from A2AJ
           2. processing — run LLM chain
-          3. (future) tts, publish, etc.
+          3. tts — synthesize audio from the final digest
+          4. telegram — send digest text and audio
 
         Returns dict with outputs from each stage.
         """
@@ -95,10 +105,20 @@ class PodcastRunner:
         else:
             print("[Stage 2: Processing] — skipped (no processing: section)")
 
-        # --- 3. Telegram ---
+        # --- 3. TTS ---
+        tts_config = self._raw.get("tts")
+        if tts_config and result.get("final"):
+            print("[Stage 3: TTS]")
+            handler = TTSHandler(config=tts_config, podcast_name=self.name)
+            result["audio_path"] = handler.run(result["final"])
+            print()
+        else:
+            print("[Stage 3: TTS] — skipped (no tts: section or empty digest)")
+
+        # --- 4. Telegram ---
         telegram_config = self._raw.get("telegram")
         if telegram_config:
-            print("[Stage 3: Telegram]")
+            print("[Stage 4: Telegram]")
             handler = TelegramHandler(
                 config=telegram_config,
                 podcast_name=self.name,
@@ -112,13 +132,13 @@ class PodcastRunner:
             result["telegram"] = telegram_result
             print()
         else:
-            print("[Stage 3: Telegram] — skipped (no telegram: section)")
+            print("[Stage 4: Telegram] — skipped (no telegram: section)")
 
-        # --- Future stages ---
-        # if self._raw.get("tts"):
-        #     ...
-        # if self._raw.get("publish"):
-        #     ...
+        # --- Mark cases as processed so the next run skips them ---
+        filter_handler = result.get("_filter_handler")
+        if filter_handler is not None and result.get("final"):
+            filter_handler.mark_all_processed(cases)
+            print(f"[Dedup] marked {len(cases)} case(s) as processed")
 
         print(f"{'=' * 60}")
         print(f"  Pipeline complete for: {self.name}")

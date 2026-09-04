@@ -33,3 +33,6 @@ env/
 
 # Project artifacts
 *.log
+
+# Generated audio
+data/audio/
