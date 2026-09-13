@@ -16,6 +16,9 @@ import copy
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 import yaml
 from src.runner import PodcastRunner
 
@@ -36,6 +39,8 @@ def test_dry_run():
         print(f"    podcast:    {runner.podcast.get('name')}")
         print(f"    has filter: {'filter' in runner._raw}")
         print(f"    has proc:   {'processing' in runner._raw}")
+        print(f"    has tts:    {'tts' in runner._raw}")
+        print(f"    has tg:     {'telegram' in runner._raw}")
     print()
 
 
@@ -57,6 +62,9 @@ def test_full_pipeline():
     }
     config["filter"]["max_results"] = 2
     config["filter"]["max_text_chars"] = 3000
+    # Skip audio + Telegram for the cheap test run
+    config.pop("tts", None)
+    config.pop("telegram", None)
 
     runner = PodcastRunner(config)
     result = runner.run()

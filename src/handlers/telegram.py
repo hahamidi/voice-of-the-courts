@@ -5,21 +5,41 @@ Telegram handler — sends digest text and audio to a Telegram channel.
 
 Reads the "telegram:" section of a unified podcast YAML.
 
-Required env var: TELEGRAM_BOT_TOKEN (or whatever is set in bot_token_env)
+Config:
+  bot_token_env: TELEGRAM_BOT_TOKEN       # env var holding the bot token
+  channel: "@name" or "-100123..."        # literal chat id, or
+  channel_env: TELEGRAM_TEST_CHANNEL      # env var holding the chat id (preferred, keeps ids out of YAML)
+  send_digest / send_audio / parse_mode / max_message_length
 """
 
 import os
+import re
 
 import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
 
+def _markdown_to_telegram(text: str) -> str:
+    """Telegram's Markdown has no headings or horizontal rules; convert them."""
+    text = re.sub(r"^[ \t]*#{1,6}[ \t]*(.+?)[ \t]*$", r"*\1*", text, flags=re.MULTILINE)  # "### Title" -> "*Title*"
+    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)  # "**bold**" -> "*bold*"
+    text = re.sub(r"^[ \t]*[-*_]{3,}[ \t]*$", "", text, flags=re.MULTILINE)  # drop "---"
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 class TelegramHandler:
     """Send text digests and audio files to a Telegram channel."""
 
     def __init__(self, config: dict, podcast_name: str = ""):
+        # Channel: literal "channel" or env var name in "channel_env"
         self.channel: str = config.get("channel", "")
+        channel_env = config.get("channel_env")
+        if channel_env:
+            self.channel = os.environ.get(channel_env, "") or self.channel
+        if not self.channel:
+            raise ValueError("Telegram channel not set. Use channel: or channel_env: in the telegram section.")
         self.send_digest: bool = config.get("send_digest", True)
         self.send_audio: bool = config.get("send_audio", True)
         self.parse_mode: str = config.get("parse_mode", "Markdown")
@@ -65,6 +85,8 @@ class TelegramHandler:
 
     def _send_text(self, text: str) -> list[dict]:
         """Send text message(s). Splits into chunks if too long."""
+        if self.parse_mode.lower() == "markdown":
+            text = _markdown_to_telegram(text)
         chunks = self._split_text(text)
         responses = []
         for i, chunk in enumerate(chunks):
@@ -75,13 +97,15 @@ class TelegramHandler:
                 json={
                     "chat_id": self.channel,
                     "text": chunk,
-                    "parse_mode": self.parse_mode,
+                    **({"parse_mode": self.parse_mode} if self.parse_mode else {}),
                 },
             )
             data = resp.json()
             if not data.get("ok"):
-                print(f"    error: {data.get('description')}")
-                resp.raise_for_status()
+                # Do not use raise_for_status: its message includes the URL with the bot token
+                raise RuntimeError(
+                    f"Telegram sendMessage failed ({resp.status_code}): {data.get('description')}"
+                )
             responses.append(data)
         print(f"  [telegram] text sent ({len(chunks)} message(s))")
         return responses
@@ -132,10 +156,10 @@ class TelegramHandler:
                 files={"audio": (os.path.basename(audio_path), f)},
             )
 
-        resp.raise_for_status()
         data = resp.json()
         if not data.get("ok"):
-            print(f"    warning: Telegram API error: {data.get('description')}")
-        else:
-            print("  [telegram] audio sent")
+            raise RuntimeError(
+                f"Telegram sendAudio failed ({resp.status_code}): {data.get('description')}"
+            )
+        print("  [telegram] audio sent")
         return data

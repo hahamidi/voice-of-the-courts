@@ -35,12 +35,12 @@ filter:
 processing:
   models:
     fast:
-      provider: openai
-      name: gpt-4o-mini
+      provider: together_ai
+      name: deepseek-ai/DeepSeek-V4-Flash-0731   # reasoning model, $0.14/$0.28 per 1M tokens
       temperature: 0.3
     smart:
-      provider: openai
-      name: gpt-4o-mini
+      provider: together_ai
+      name: Qwen/Qwen3.8-Flash                   # $0.15/$0.47 per 1M tokens, streaming-only (auto-handled)
       temperature: 0.5
   chain:
     - name: split_cases
@@ -95,3 +95,12 @@ processing:
         --- SUMMARIES ---
         @input
         --- END ---
+
+# --- TTS ---
+tts:
+  provider: elevenlabs        # any LiteLLM speech provider (openai, elevenlabs, azure, gemini, ...)
+  model: eleven_flash_v2_5     # 0.5 credit/char, cheapest; eleven_multilingual_v2 for higher quality
+  voice: alloy                # OpenAI-style alias or an ElevenLabs voice id
+  output_dir: data/audio
+  filename: "{podcast}_{date}.mp3"
+  max_chars: 4000

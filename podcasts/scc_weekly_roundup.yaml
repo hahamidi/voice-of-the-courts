@@ -29,12 +29,12 @@ filter:
 processing:
   models:
     fast:
-      provider: openai
-      name: gpt-4o-mini
+      provider: together_ai
+      name: deepseek-ai/DeepSeek-V4-Flash-0731   # reasoning model, $0.14/$0.28 per 1M tokens
       temperature: 0.3
     smart:
-      provider: openai
-      name: gpt-4o-mini
+      provider: together_ai
+      name: Qwen/Qwen3.8-Flash                   # $0.15/$0.47 per 1M tokens, streaming-only (auto-handled)
       temperature: 0.5
   chain:
     - name: split_cases
@@ -76,12 +76,28 @@ processing:
         Tone: @tone
 
         Below are summaries of this week's Supreme Court decisions.
-        Write a cohesive weekly digest with:
-        - A short intro paragraph
-        - Each case as its own section with a plain-language headline
-        - A closing paragraph on what to watch next
+        Write a Telegram post in EXACTLY this layout. Use *single asterisks* for bold.
+        Do not use Markdown headings (#), horizontal rules (---), tables, or **double asterisks**.
 
-        Keep the total under 800 words.
+        🏛️ *Voice of the Courts — Weekly Supreme Court Roundup*
+        _One or two sentence intro on what this week was about._
+
+        Then for each case:
+
+        ⚖️ *Plain-language headline for the case*
+        📌 *Case:* case name
+        ✅ *Result:* one sentence on who won / what the Court decided
+        💡 *Why it matters:* two or three sentences for everyday Canadians
+        👉 *Takeaway:* one short sentence
+
+        End with:
+
+        🔭 *What to watch next*
+        Two or three sentences on themes to expect.
+
+        Put ONE empty line between every block (intro, each case, what to watch),
+        and keep the lines inside a case block together with no empty lines.
+        Keep the total under 600 words. No legal jargon.
 
         --- SUMMARIES ---
         @input
@@ -90,12 +106,16 @@ processing:
 # --- Telegram ---
 telegram:
   bot_token_env: "TELEGRAM_BOT_TOKEN"
-  channel: "YOUR_TELEGRAM_CHANNEL_ID"
+  channel_env: "TELEGRAM_TEST_CHANNEL"   # or channel: "@name" / "-100123..."
   send_digest: true
-  send_audio: false
+  send_audio: true
   parse_mode: "Markdown"
 
-# --- TTS (placeholder) ---
-# tts:
-#   engine: elevenlabs
-#   voice: "Rachel"
+# --- TTS ---
+tts:
+  provider: elevenlabs        # any LiteLLM speech provider (openai, elevenlabs, azure, gemini, ...)
+  model: eleven_flash_v2_5     # 0.5 credit/char, cheapest; eleven_multilingual_v2 for higher quality
+  voice: alloy                # OpenAI-style alias or an ElevenLabs voice id
+  output_dir: data/audio
+  filename: "{podcast}_{date}.mp3"
+  max_chars: 4000
